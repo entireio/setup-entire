@@ -11,8 +11,10 @@ Create a service account in your project, give it a repository, and bind it to t
 ```bash
 entire sa create my-project ci
 entire sa grant my-project/ci --repo my-repo --role writer
-entire sa bind my-project/ci --github-repository my-gh-org/my-gh-repo
+entire sa bind my-project/ci --provider github-actions --pin repository=my-gh-org/my-gh-repo
 ```
+
+Add `--pin ref=refs/heads/main` to allow only workflows on `main`. `entire sa providers github-actions` lists every pin.
 
 `create` prints the `svc_` ID. You can do the same in the web app under Project settings > Service accounts.
 

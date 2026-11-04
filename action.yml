@@ -1,0 +1,135 @@
+name: 'Setup Entire'
+description: 'Install the Entire CLI and push to Entire with OIDC. No secrets.'
+author: 'Entire'
+branding:
+  icon: 'git-branch'
+  color: 'purple'
+
+inputs:
+  service-account:
+    description: 'Service account to act as (svc_<ulid>). Omit to install only.'
+    required: false
+    default: ''
+  auth-url:
+    description: 'Entire auth server, e.g. https://us.auth.entire.io.'
+    required: false
+    default: 'https://us.auth.entire.io'
+  version:
+    description: 'entireio/cli release tag to install, e.g. v0.12.2.'
+    required: false
+    default: 'v0.12.2'
+  install:
+    description: 'Install entire and git-remote-entire onto PATH.'
+    required: false
+    default: 'true'
+  export-env:
+    description: 'Export the token as ENTIRE_TOKEN for later steps.'
+    required: false
+    default: 'true'
+
+outputs:
+  token:
+    description: 'Service-account access token. Masked in logs.'
+    value: ${{ steps.auth.outputs.token }}
+  expires-in:
+    description: 'Token lifetime in seconds.'
+    value: ${{ steps.auth.outputs.expires_in }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Entire CLI
+      if: inputs.install == 'true'
+      shell: bash
+      env:
+        ENTIRE_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS/$RUNNER_ARCH" in
+          Linux/X64) asset=entire_linux_amd64.tar.gz ;;
+          Linux/ARM64) asset=entire_linux_arm64.tar.gz ;;
+          macOS/X64) asset=entire_darwin_amd64.tar.gz ;;
+          macOS/ARM64) asset=entire_darwin_arm64.tar.gz ;;
+          *) echo "::error::Unsupported runner: $RUNNER_OS/$RUNNER_ARCH" >&2; exit 1 ;;
+        esac
+        case "$ENTIRE_VERSION" in
+          v[0-9]*) ;;
+          *) echo "::error::version must be a tag like v0.12.2" >&2; exit 1 ;;
+        esac
+        base="https://github.com/entireio/cli/releases/download/${ENTIRE_VERSION}"
+        dir="$RUNNER_TEMP/entire-${ENTIRE_VERSION}"
+        mkdir -p "$dir"
+        curl -fsSL --proto '=https' -o "$dir/$asset" "$base/$asset"
+        curl -fsSL --proto '=https' -o "$dir/checksums.txt" "$base/checksums.txt"
+        # Verify before extracting anything.
+        ( cd "$dir" && grep "  ${asset}\$" checksums.txt | shasum -a 256 -c - )
+        tar -xzf "$dir/$asset" -C "$dir" entire git-remote-entire
+        echo "$dir" >> "$GITHUB_PATH"
+
+    - name: Get Entire token
+      id: auth
+      if: inputs.service-account != ''
+      shell: bash
+      env:
+        SERVICE_ACCOUNT: ${{ inputs.service-account }}
+        AUTH_URL: ${{ inputs.auth-url }}
+        EXPORT_ENV: ${{ inputs.export-env }}
+      run: |
+        set -euo pipefail
+        # Forks get no OIDC token either.
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::No OIDC token: set id-token: write (forks get none)." >&2
+          exit 1
+        fi
+        case "$SERVICE_ACCOUNT" in
+          svc_[0-9A-HJKMNP-TV-Z]*) ;;
+          *) echo "::error::service-account must look like svc_<ulid>." >&2; exit 1 ;;
+        esac
+        case "$AUTH_URL" in
+          https://*) ;;
+          *) echo "::error::auth-url must use https." >&2; exit 1 ;;
+        esac
+        AUTH_URL="${AUTH_URL%/}"
+        ua="setup-entire/${GITHUB_ACTION_REF:-dev}"
+
+        oidc=$(curl -fsS --proto '=https' --get \
+          --data-urlencode "audience=${AUTH_URL}/api/authz/sts" \
+          -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -r .value)
+        if [ -z "$oidc" ] || [ "$oidc" = null ]; then
+          echo "::error::GitHub returned no OIDC token." >&2
+          exit 1
+        fi
+        echo "::add-mask::$oidc"
+
+        body=$(mktemp)
+        trap 'rm -f "$body"' EXIT
+        # No -L: the body carries the OIDC token.
+        code=$(curl -sS --proto '=https' -o "$body" -w '%{http_code}' \
+          -A "$ua" -u entire-cli: "${AUTH_URL}/oauth/token" \
+          --data-urlencode grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+          --data-urlencode subject_token_type=urn:ietf:params:oauth:token-type:jwt \
+          --data-urlencode "subject_token=${oidc}" \
+          --data-urlencode "audience=${AUTH_URL}" \
+          --data-urlencode "resource=${SERVICE_ACCOUNT}")
+        if [ "$code" != 200 ]; then
+          echo "::error::Token exchange failed (HTTP $code). Check the binding's repository." >&2
+          jq -r '.error_description // .error // empty' < "$body" >&2 || true
+          exit 1
+        fi
+
+        token=$(jq -r .access_token < "$body")
+        expires_in=$(jq -r .expires_in < "$body")
+        # Shape checks block GITHUB_ENV injection.
+        case "$token" in
+          "" | *[!A-Za-z0-9._-]*) echo "::error::Malformed access_token." >&2; exit 1 ;;
+        esac
+        case "$expires_in" in
+          "" | *[!0-9]*) echo "::error::Malformed expires_in." >&2; exit 1 ;;
+        esac
+        echo "::add-mask::$token"
+        printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
+        printf 'expires_in=%s\n' "$expires_in" >> "$GITHUB_OUTPUT"
+        if [ "$EXPORT_ENV" = true ]; then
+          printf 'ENTIRE_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+        fi

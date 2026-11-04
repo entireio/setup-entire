@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint"
+      - name: shellcheck action scripts
+        run: |
+          set -euo pipefail
+          n=$(yq '.runs.steps | length' action.yml)
+          for i in $(seq 0 $((n - 1))); do
+            f="$RUNNER_TEMP/step$i.sh"
+            { echo '#!/usr/bin/env bash'; yq ".runs.steps[$i].run" action.yml; } > "$f"
+            shellcheck "$f"
+          done
+
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./
+      - run: |
+          entire version
+          git-remote-entire --version
+
+  auth:
+    # Forks get no OIDC token.
+    if: >-
+      vars.ENTIRE_TEST_SERVICE_ACCOUNT != '' &&
+      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./
+        id: entire
+        with:
+          service-account: ${{ vars.ENTIRE_TEST_SERVICE_ACCOUNT }}
+          auth-url: ${{ vars.ENTIRE_TEST_AUTH_URL || 'https://us.auth.entire.io' }}
+      - name: Read the test repo
+        env:
+          REMOTE: ${{ vars.ENTIRE_TEST_REMOTE }}
+          EXPIRES_IN: ${{ steps.entire.outputs.expires-in }}
+        run: |
+          set -euo pipefail
+          test -n "$ENTIRE_TOKEN"
+          echo "token expires in ${EXPIRES_IN}s"
+          git ls-remote --heads "$REMOTE"

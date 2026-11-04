@@ -76,8 +76,9 @@ runs:
         EXPORT_ENV: ${{ inputs.export-env }}
       run: |
         set -euo pipefail
-        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-          echo "::error::Add 'permissions: id-token: write' to the job." >&2
+        # Forks get no OIDC token either.
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::No OIDC token: set id-token: write (forks get none)." >&2
           exit 1
         fi
         case "$SERVICE_ACCOUNT" in

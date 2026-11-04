@@ -70,7 +70,7 @@ Use `@v1` to get fixes. For a stronger supply-chain guarantee, pin the full comm
 
 ## Troubleshooting
 
-- **Add `permissions: id-token: write`**: the job lacks the OIDC permission.
+- **No OIDC token**: GitHub gave the job no OIDC token. Either the workflow or job lacks `permissions: id-token: write`, or the run is a pull request from a fork. GitHub turns a fork run's write permissions into read, and `id-token` has no read level, so a fork run never gets a token.
 - **Token exchange failed (HTTP 400)**: the service account has no binding, or its repository does not match `github.repository`.
 - **Repository not found** at push time: the service account has no grant on that repo.
 

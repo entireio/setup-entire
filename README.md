@@ -6,13 +6,17 @@ The action installs `entire` and `git-remote-entire`. It then trades the job's G
 
 ## One-time setup
 
+The `entire sa` commands need `entire` v0.13.1 or later.
+
 Create a service account in your project, give it a repository, and bind it to the GitHub repository that runs the workflow:
 
 ```bash
 entire sa create my-project ci
 entire sa grant my-project/ci --repo my-repo --role writer
-entire sa bind my-project/ci --github-repository my-gh-org/my-gh-repo
+entire sa bind my-project/ci --provider github-actions --pin repository=my-gh-org/my-gh-repo
 ```
+
+Add `--pin ref=refs/heads/main` to allow only workflows on `main`. `entire sa providers github-actions` lists every pin.
 
 `create` prints the `svc_` ID. You can do the same in the web app under Project settings > Service accounts.
 
@@ -71,7 +75,7 @@ Use `@v1` to get fixes. For a stronger supply-chain guarantee, pin the full comm
 ## Troubleshooting
 
 - **No OIDC token**: GitHub gave the job no OIDC token. Either the workflow or job lacks `permissions: id-token: write`, or the run is a pull request from a fork. GitHub turns a fork run's write permissions into read, and `id-token` has no read level, so a fork run never gets a token.
-- **Token exchange failed (HTTP 400)**: the service account has no binding, or its repository does not match `github.repository`.
+- **Token exchange failed (HTTP 400)**: the service account has no binding, or a pin does not match the run. Check `repository` against `github.repository` and `ref` against `github.ref`.
 - **Repository not found** at push time: the service account has no grant on that repo.
 
 ## Developing

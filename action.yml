@@ -15,9 +15,9 @@ inputs:
     required: false
     default: 'https://us.auth.entire.io'
   version:
-    description: 'entireio/cli release tag to install, e.g. v0.12.2.'
+    description: 'entireio/cli release tag to install, e.g. v0.13.1.'
     required: false
-    default: 'v0.12.2'
+    default: 'v0.13.1'
   install:
     description: 'Install entire and git-remote-entire onto PATH.'
     required: false
@@ -54,7 +54,7 @@ runs:
         esac
         case "$ENTIRE_VERSION" in
           v[0-9]*) ;;
-          *) echo "::error::version must be a tag like v0.12.2" >&2; exit 1 ;;
+          *) echo "::error::version must be a tag like v0.13.1" >&2; exit 1 ;;
         esac
         base="https://github.com/entireio/cli/releases/download/${ENTIRE_VERSION}"
         dir="$RUNNER_TEMP/entire-${ENTIRE_VERSION}"
